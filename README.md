@@ -49,9 +49,12 @@ A comprehensive Point of Sale (POS) system backend built with Node.js, Express, 
    MONGODB_URI=mongodb://localhost:27017/pos-system
    JWT_SECRET=your-jwt-secret-key
    WEBHOOK_API_KEY=your-webhook-api-key
+   
+   # WooCommerce Product Sync (Optional)
    WORDPRESS_URL=https://your-wordpress-site.com
    WORDPRESS_API_KEY=your-wordpress-api-key
    SYNC_TO_WOOCOMMERCE=true
+   
    CLOUDINARY_CLOUD_NAME=your-cloudinary-cloud-name
    CLOUDINARY_API_KEY=your-cloudinary-api-key
    CLOUDINARY_API_SECRET=your-cloudinary-api-secret
@@ -59,7 +62,7 @@ A comprehensive Point of Sale (POS) system backend built with Node.js, Express, 
    
    > **Note:** 
    > - Generate a secure webhook API key using: `openssl rand -hex 32`
-   > - Get WordPress API key from WordPress Admin → POS Sync settings
+   > - Get WordPress API key from: WordPress Admin → POS Sync → Settings
 
 4. Start the server:
    ```bash
@@ -144,10 +147,11 @@ pos-backend/
 - `GET /api/webhooks/orders/stats` - Get order statistics (Auth required)
 - `GET /api/webhooks/health` - Webhook service health check
 
-### WooCommerce Product Sync
-- `GET /api/woocommerce/status` - Check sync status (Auth required)
-- `POST /api/woocommerce/sync-product/:id` - Sync single product (Admin only)
-- `POST /api/woocommerce/sync-all` - Sync all products (Admin only)
+### Product Sync (WooCommerce Integration)
+- `GET /api/woocommerce/status` - Check WooCommerce sync status (Auth required)
+- `POST /api/woocommerce/sync-product/:id` - Manually sync single product (Admin only)
+- `POST /api/woocommerce/sync-all` - Manually sync all products (Admin only)
+- `DELETE /api/woocommerce/delete-product/:id` - Delete product from WooCommerce (Admin only)
 
 For complete API documentation, visit the Swagger UI at `/api-docs`.
 
@@ -246,11 +250,12 @@ This POS system can receive order webhooks from WooCommerce for real-time synchr
 - **Features:**
   - Automatic product sync on create/update/delete
   - Manual sync endpoints for bulk operations
-  - Status checking and monitoring
+  - Status checking and error handling
   - Complete product data mapping
 
 ## Version History
 
 - **v1.0.0** - Initial release with core POS functionality
 - **v1.1.0** - Added Swagger documentation and enhanced API features
-- **v1.2.0** - Added WooCommerce webhook integration
+- **v1.2.0** - Added WooCommerce webhook integration (orders)
+- **v1.3.0** - Added WooCommerce product sync (products)

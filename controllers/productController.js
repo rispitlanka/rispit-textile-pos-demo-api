@@ -146,7 +146,7 @@ export const createProduct = async (req, res) => {
       await category.updateProductCount();
     }
     
-    // Sync to WooCommerce (async - don't block response)
+    // Sync to WooCommerce (async, non-blocking)
     syncProductToWooCommerce(product).catch(err => {
       console.error('Failed to sync product to WooCommerce:', err);
       // Don't fail the request if sync fails
@@ -376,7 +376,7 @@ export const updateProduct = async (req, res) => {
       if (newCategory) await newCategory.updateProductCount();
     }
     
-    // Sync to WooCommerce (async - don't block response)
+    // Sync to WooCommerce (async, non-blocking)
     syncProductToWooCommerce(product).catch(err => {
       console.error('Failed to sync product to WooCommerce:', err);
       // Don't fail the request if sync fails

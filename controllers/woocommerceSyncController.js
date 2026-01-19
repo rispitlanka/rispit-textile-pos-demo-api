@@ -1,7 +1,8 @@
 import Product from '../models/Product.js';
-import { 
-  syncProductToWooCommerce, 
+import {
+  syncProductToWooCommerce,
   syncProductsToWooCommerce,
+  deleteProductFromWooCommerce,
   checkWordPressPluginStatus,
   isWooCommerceSyncEnabled
 } from '../utils/woocommerce-sync.js';
@@ -15,7 +16,7 @@ export const syncProduct = async (req, res) => {
     if (!isWooCommerceSyncEnabled()) {
       return res.status(400).json({
         success: false,
-        message: 'WooCommerce sync is not enabled. Please configure WORDPRESS_URL, WORDPRESS_API_KEY, and SYNC_TO_WOOCOMMERCE in .env file.'
+        message: 'WooCommerce sync is not enabled. Please configure WORDPRESS_URL, WORDPRESS_API_KEY, and set SYNC_TO_WOOCOMMERCE=true in your .env file.'
       });
     }
 
@@ -30,25 +31,25 @@ export const syncProduct = async (req, res) => {
 
     const result = await syncProductToWooCommerce(product);
     
-    if (result) {
-      res.json({
-        success: true,
-        message: 'Product synced to WooCommerce successfully',
-        product: {
-          id: product._id,
-          name: product.name,
-          sku: product.sku
-        },
-        wooCommerce: result
-      });
-    } else {
-      res.status(500).json({
+    if (result && result.success === false) {
+      return res.status(500).json({
         success: false,
-        message: 'Failed to sync product to WooCommerce. Check server logs for details.'
+        message: 'Failed to sync product to WooCommerce',
+        error: result.error
       });
     }
+
+    res.json({
+      success: true,
+      message: 'Product synced to WooCommerce successfully',
+      product: {
+        id: product._id,
+        name: product.name,
+        sku: product.sku
+      },
+      wooCommerce: result
+    });
   } catch (error) {
-    console.error('Error syncing product:', error);
     res.status(500).json({
       success: false,
       message: error.message
@@ -65,7 +66,7 @@ export const syncAllProducts = async (req, res) => {
     if (!isWooCommerceSyncEnabled()) {
       return res.status(400).json({
         success: false,
-        message: 'WooCommerce sync is not enabled. Please configure WORDPRESS_URL, WORDPRESS_API_KEY, and SYNC_TO_WOOCOMMERCE in .env file.'
+        message: 'WooCommerce sync is not enabled. Please configure WORDPRESS_URL, WORDPRESS_API_KEY, and set SYNC_TO_WOOCOMMERCE=true in your .env file.'
       });
     }
 
@@ -79,29 +80,31 @@ export const syncAllProducts = async (req, res) => {
     if (products.length === 0) {
       return res.json({
         success: true,
-        message: 'No products found to sync',
-        synced: 0,
-        failed: 0
+        message: 'No products to sync',
+        results: {
+          success: [],
+          failed: []
+        }
       });
     }
 
     const result = await syncProductsToWooCommerce(products);
     
-    if (result) {
-      res.json({
-        success: true,
-        message: `Synced ${products.length} products to WooCommerce`,
-        synced: products.length,
-        result: result.results || { success: [], failed: [] }
-      });
-    } else {
-      res.status(500).json({
+    if (result && result.success === false) {
+      return res.status(500).json({
         success: false,
-        message: 'Failed to sync products to WooCommerce. Check server logs for details.'
+        message: 'Failed to sync products to WooCommerce',
+        error: result.error
       });
     }
+
+    res.json({
+      success: true,
+      message: `Synced ${products.length} products to WooCommerce`,
+      synced: products.length,
+      results: result?.results || result
+    });
   } catch (error) {
-    console.error('Error syncing products:', error);
     res.status(500).json({
       success: false,
       message: error.message
@@ -110,7 +113,7 @@ export const syncAllProducts = async (req, res) => {
 };
 
 /**
- * Check WordPress plugin status
+ * Check WooCommerce plugin connection status
  * GET /api/woocommerce/status
  */
 export const getSyncStatus = async (req, res) => {
@@ -120,10 +123,66 @@ export const getSyncStatus = async (req, res) => {
     res.json({
       success: true,
       syncEnabled: isWooCommerceSyncEnabled(),
-      wordPress: status
+      ...status
     });
   } catch (error) {
-    console.error('Error checking sync status:', error);
+    res.status(500).json({
+      success: false,
+      message: error.message
+    });
+  }
+};
+
+/**
+ * Delete product from WooCommerce
+ * DELETE /api/woocommerce/delete-product/:id
+ */
+export const deleteProductFromWC = async (req, res) => {
+  try {
+    if (!isWooCommerceSyncEnabled()) {
+      return res.status(400).json({
+        success: false,
+        message: 'WooCommerce sync is not enabled'
+      });
+    }
+
+    const product = await Product.findById(req.params.id);
+    
+    if (!product) {
+      return res.status(404).json({
+        success: false,
+        message: 'Product not found'
+      });
+    }
+
+    if (!product.sku) {
+      return res.status(400).json({
+        success: false,
+        message: 'Product does not have a SKU'
+      });
+    }
+
+    const result = await deleteProductFromWooCommerce(product.sku);
+    
+    if (result && result.success === false) {
+      return res.status(500).json({
+        success: false,
+        message: 'Failed to delete product from WooCommerce',
+        error: result.error
+      });
+    }
+
+    res.json({
+      success: true,
+      message: 'Product deleted from WooCommerce successfully',
+      product: {
+        id: product._id,
+        name: product.name,
+        sku: product.sku
+      },
+      wooCommerce: result
+    });
+  } catch (error) {
     res.status(500).json({
       success: false,
       message: error.message

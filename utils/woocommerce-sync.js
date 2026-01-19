@@ -14,102 +14,73 @@ export function isWooCommerceSyncEnabled() {
 /**
  * Transform POS product to WooCommerce format
  */
-export function transformProductToWooCommerce(posProduct) {
-  // Handle both populated and non-populated category
-  let categoryName = posProduct.category;
-  if (typeof posProduct.category === 'object' && posProduct.category.name) {
-    categoryName = posProduct.category.name;
+function transformProductToWooCommerce(posProduct) {
+  // Handle products with variations - sync main product only
+  // WooCommerce will handle variations separately if needed
+  const wcProduct = {
+    sku: posProduct.sku || posProduct._id?.toString() || `POS-${Date.now()}`,
+    name: posProduct.name,
+    price: posProduct.sellingPrice || posProduct.price || 0,
+    sale_price: posProduct.discountedPrice || null,
+    description: posProduct.description || '',
+    short_description: posProduct.name.substring(0, 160) || posProduct.name,
+    stock_quantity: posProduct.stock || 0,
+    manage_stock: true,
+    stock_status: (posProduct.stock > 0) ? 'instock' : 'outofstock',
+  };
+
+  // Add weight if available
+  if (posProduct.weight) {
+    wcProduct.weight = posProduct.weight;
   }
 
-  // Build images array
-  const images = [];
+  // Add dimensions if available
+  if (posProduct.length) wcProduct.length = posProduct.length;
+  if (posProduct.width) wcProduct.width = posProduct.width;
+  if (posProduct.height) wcProduct.height = posProduct.height;
+
+  // Add category
+  if (posProduct.category) {
+    wcProduct.categories = [posProduct.category];
+  }
+
+  // Add image if available
   if (posProduct.image) {
-    images.push(posProduct.image);
-  }
-  
-  // Add variation combination images if they exist
-  if (posProduct.variationCombinations && posProduct.variationCombinations.length > 0) {
-    posProduct.variationCombinations.forEach(combination => {
-      if (combination.image) {
-        images.push(combination.image);
-      }
-    });
+    wcProduct.images = [posProduct.image];
   }
 
-  // Calculate stock status
-  const totalStock = posProduct.stock || 0;
-  let stockStatus = 'outofstock';
-  if (totalStock > 0) {
-    stockStatus = 'instock';
-  } else if (totalStock === 0 && posProduct.minStock > 0) {
-    stockStatus = 'outofstock';
-  }
-
-  // Build meta data
-  const metaData = [
-    { key: 'pos_product_id', value: posProduct._id.toString() },
+  // Add meta data for tracking
+  wcProduct.meta_data = [
+    { key: 'pos_product_id', value: posProduct._id?.toString() || '' },
     { key: 'pos_last_synced', value: new Date().toISOString() }
   ];
 
-  // Add variation info if product has variations
-  if (posProduct.hasVariations) {
-    metaData.push({ key: 'pos_has_variations', value: 'true' });
-    if (posProduct.variationCombinations && posProduct.variationCombinations.length > 0) {
-      metaData.push({ 
-        key: 'pos_variation_count', 
-        value: posProduct.variationCombinations.length.toString() 
-      });
-    }
-  }
-
-  // Build WooCommerce product object
-  const wcProduct = {
-    sku: posProduct.sku || posProduct._id.toString(),
-    name: posProduct.name,
-    price: posProduct.sellingPrice || posProduct.price || 0,
-    description: posProduct.description || '',
-    short_description: posProduct.name,
-    stock_quantity: totalStock,
-    manage_stock: true,
-    stock_status: stockStatus,
-    categories: categoryName ? [categoryName] : [],
-    images: images,
-    meta_data: metaData
-  };
-
-  // Add optional fields if they exist
-  if (posProduct.purchasePrice) {
-    wcProduct.meta_data.push({ 
-      key: 'pos_purchase_price', 
-      value: posProduct.purchasePrice.toString() 
-    });
-  }
-
-  if (posProduct.minStock !== undefined) {
-    wcProduct.meta_data.push({ 
-      key: 'pos_min_stock', 
-      value: posProduct.minStock.toString() 
-    });
-  }
-
-  if (posProduct.barcodeId) {
-    wcProduct.meta_data.push({ 
-      key: 'pos_barcode_id', 
-      value: posProduct.barcodeId 
-    });
-  }
-
-  if (posProduct.unit) {
-    wcProduct.meta_data.push({ 
-      key: 'pos_unit', 
-      value: posProduct.unit 
-    });
-  }
-
+  // Add tax rate if available
   if (posProduct.taxRate) {
-    wcProduct.meta_data.push({ 
-      key: 'pos_tax_rate', 
-      value: posProduct.taxRate.toString() 
+    wcProduct.meta_data.push({
+      key: 'pos_tax_rate',
+      value: posProduct.taxRate.toString()
+    });
+  }
+
+  // Add unit if available
+  if (posProduct.unit) {
+    wcProduct.meta_data.push({
+      key: 'pos_unit',
+      value: posProduct.unit
+    });
+  }
+
+  // Note: For products with variations, we sync the main product
+  // Variation combinations can be synced as separate products if needed
+  if (posProduct.hasVariations && posProduct.variationCombinations?.length > 0) {
+    wcProduct.meta_data.push({
+      key: 'pos_has_variations',
+      value: 'true'
+    });
+    wcProduct.meta_data.push({
+      key: 'pos_variation_count',
+      value: posProduct.variationCombinations.length.toString()
     });
   }
 
@@ -121,7 +92,7 @@ export function transformProductToWooCommerce(posProduct) {
  */
 export async function syncProductToWooCommerce(posProduct) {
   if (!isWooCommerceSyncEnabled()) {
-    console.log('⚠️  WooCommerce sync is disabled or not configured. Skipping product sync.');
+    console.log('WooCommerce sync is disabled or not configured. Skipping product sync.');
     return null;
   }
 
@@ -143,15 +114,16 @@ export async function syncProductToWooCommerce(posProduct) {
     console.log(`✅ Product synced to WooCommerce: ${posProduct.name} (SKU: ${wcProduct.sku})`);
     return response.data;
   } catch (error) {
-    console.error('❌ Error syncing product to WooCommerce:', {
-      productName: posProduct.name,
-      sku: posProduct.sku,
-      error: error.response?.data || error.message,
-      status: error.response?.status
-    });
+    // Log error but don't throw - we don't want to break product operations
+    console.error(`❌ Error syncing product to WooCommerce (${posProduct.name}):`, 
+      error.response?.data || error.message);
     
-    // Don't throw error - allow product operations to continue even if sync fails
-    return null;
+    // Return error info for optional handling
+    return {
+      success: false,
+      error: error.response?.data || error.message,
+      product: posProduct.name
+    };
   }
 }
 
@@ -160,12 +132,7 @@ export async function syncProductToWooCommerce(posProduct) {
  */
 export async function syncProductsToWooCommerce(posProducts) {
   if (!isWooCommerceSyncEnabled()) {
-    console.log('⚠️  WooCommerce sync is disabled or not configured. Skipping batch sync.');
-    return null;
-  }
-
-  if (!posProducts || posProducts.length === 0) {
-    console.log('⚠️  No products provided for sync.');
+    console.log('WooCommerce sync is disabled or not configured. Skipping batch sync.');
     return null;
   }
 
@@ -185,23 +152,15 @@ export async function syncProductsToWooCommerce(posProducts) {
     );
     
     console.log(`✅ Synced ${wcProducts.length} products to WooCommerce`);
-    
-    if (response.data.results) {
-      const { success, failed } = response.data.results;
-      if (failed && failed.length > 0) {
-        console.warn(`⚠️  ${failed.length} products failed to sync:`, failed);
-      }
-    }
-    
     return response.data;
   } catch (error) {
-    console.error('❌ Error syncing products to WooCommerce:', {
-      productCount: posProducts.length,
-      error: error.response?.data || error.message,
-      status: error.response?.status
-    });
+    console.error('❌ Error syncing products to WooCommerce:', 
+      error.response?.data || error.message);
     
-    return null;
+    return {
+      success: false,
+      error: error.response?.data || error.message
+    };
   }
 }
 
@@ -210,12 +169,12 @@ export async function syncProductsToWooCommerce(posProducts) {
  */
 export async function deleteProductFromWooCommerce(sku) {
   if (!isWooCommerceSyncEnabled()) {
-    console.log('⚠️  WooCommerce sync is disabled or not configured. Skipping product deletion.');
+    console.log('WooCommerce sync is disabled or not configured. Skipping product deletion.');
     return null;
   }
 
   if (!sku) {
-    console.warn('⚠️  No SKU provided for product deletion.');
+    console.warn('No SKU provided for WooCommerce product deletion');
     return null;
   }
 
@@ -235,14 +194,14 @@ export async function deleteProductFromWooCommerce(sku) {
     console.log(`✅ Product deleted from WooCommerce: ${sku}`);
     return response.data;
   } catch (error) {
-    console.error('❌ Error deleting product from WooCommerce:', {
-      sku,
-      error: error.response?.data || error.message,
-      status: error.response?.status
-    });
+    // Log error but don't throw
+    console.error(`❌ Error deleting product from WooCommerce (SKU: ${sku}):`, 
+      error.response?.data || error.message);
     
-    // Don't throw error - allow deletion to continue even if sync fails
-    return null;
+    return {
+      success: false,
+      error: error.response?.data || error.message
+    };
   }
 }
 
@@ -253,7 +212,7 @@ export async function checkWordPressPluginStatus() {
   if (!WORDPRESS_URL || !WORDPRESS_API_KEY) {
     return {
       enabled: false,
-      error: 'WordPress URL or API key not configured'
+      message: 'WordPress URL or API key not configured'
     };
   }
 
@@ -270,15 +229,14 @@ export async function checkWordPressPluginStatus() {
     
     return {
       enabled: true,
-      status: response.data.status,
-      woocommerce_active: response.data.woocommerce_active,
-      version: response.data.version
+      connected: true,
+      status: response.data
     };
   } catch (error) {
     return {
-      enabled: false,
-      error: error.response?.data?.message || error.message,
-      status: error.response?.status
+      enabled: true,
+      connected: false,
+      error: error.response?.data || error.message
     };
   }
 }
