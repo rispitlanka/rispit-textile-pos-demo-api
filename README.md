@@ -49,12 +49,17 @@ A comprehensive Point of Sale (POS) system backend built with Node.js, Express, 
    MONGODB_URI=mongodb://localhost:27017/pos-system
    JWT_SECRET=your-jwt-secret-key
    WEBHOOK_API_KEY=your-webhook-api-key
+   WORDPRESS_URL=https://your-wordpress-site.com
+   WORDPRESS_API_KEY=your-wordpress-api-key
+   SYNC_TO_WOOCOMMERCE=true
    CLOUDINARY_CLOUD_NAME=your-cloudinary-cloud-name
    CLOUDINARY_API_KEY=your-cloudinary-api-key
    CLOUDINARY_API_SECRET=your-cloudinary-api-secret
    ```
    
-   > **Note:** Generate a secure webhook API key using: `openssl rand -hex 32`
+   > **Note:** 
+   > - Generate a secure webhook API key using: `openssl rand -hex 32`
+   > - Get WordPress API key from WordPress Admin → POS Sync settings
 
 4. Start the server:
    ```bash
@@ -139,6 +144,11 @@ pos-backend/
 - `GET /api/webhooks/orders/stats` - Get order statistics (Auth required)
 - `GET /api/webhooks/health` - Webhook service health check
 
+### WooCommerce Product Sync
+- `GET /api/woocommerce/status` - Check sync status (Auth required)
+- `POST /api/woocommerce/sync-product/:id` - Sync single product (Admin only)
+- `POST /api/woocommerce/sync-all` - Sync all products (Admin only)
+
 For complete API documentation, visit the Swagger UI at `/api-docs`.
 
 ## Authentication
@@ -222,6 +232,7 @@ This POS system can receive order webhooks from WooCommerce for real-time synchr
 
 ### Documentation
 
+**Order Webhooks (WooCommerce → POS):**
 - **Quick Setup:** See `WEBHOOK_SETUP_GUIDE.md`
 - **Full Documentation:** See `WEBHOOK_INTEGRATION.md`
 - **Features:**
@@ -229,6 +240,14 @@ This POS system can receive order webhooks from WooCommerce for real-time synchr
   - Customer data synchronization
   - Order status tracking
   - Stock restoration on cancellations/refunds
+
+**Product Sync (POS → WooCommerce):**
+- **Setup Guide:** See `PRODUCT_SYNC_GUIDE.md`
+- **Features:**
+  - Automatic product sync on create/update/delete
+  - Manual sync endpoints for bulk operations
+  - Status checking and monitoring
+  - Complete product data mapping
 
 ## Version History
 

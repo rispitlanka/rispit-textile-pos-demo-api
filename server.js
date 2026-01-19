@@ -26,6 +26,7 @@ import uploadRoutes from './routes/uploadRoutes.js';
 import purchaseOrderRoutes from './routes/purchaseOrderRoutes.js';
 import supplierRoutes from './routes/supplierRoutes.js';
 import webhookRoutes from './routes/webhookRoutes.js';
+import woocommerceSyncRoutes from './routes/woocommerceSyncRoutes.js';
 
 dotenv.config();
 
@@ -77,6 +78,7 @@ app.use('/api/uploads', uploadRoutes);
 app.use('/api/purchase-orders', purchaseOrderRoutes);
 app.use('/api/suppliers', supplierRoutes);
 app.use('/api/webhooks', webhookRoutes);
+app.use('/api/woocommerce', woocommerceSyncRoutes);
 
 // Welcome endpoint - no auth required
 /**

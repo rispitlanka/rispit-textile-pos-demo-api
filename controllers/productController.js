@@ -3,6 +3,7 @@ import Category from '../models/Category.js';
 import ProductVariation from '../models/ProductVariation.js';
 import QRCode from 'qrcode';
 import { deleteFromCloudinary, getPublicIdFromUrl } from '../config/cloudinary.js';
+import { syncProductToWooCommerce, deleteProductFromWooCommerce } from '../utils/woocommerce-sync.js';
 
 // Helper function to parse JSON fields from multipart form data
 const parseJSONFields = (data, fields) => {
@@ -144,6 +145,12 @@ export const createProduct = async (req, res) => {
     if (category) {
       await category.updateProductCount();
     }
+    
+    // Sync to WooCommerce (async - don't block response)
+    syncProductToWooCommerce(product).catch(err => {
+      console.error('Failed to sync product to WooCommerce:', err);
+      // Don't fail the request if sync fails
+    });
     
     res.status(201).json({
       success: true,
@@ -369,6 +376,12 @@ export const updateProduct = async (req, res) => {
       if (newCategory) await newCategory.updateProductCount();
     }
     
+    // Sync to WooCommerce (async - don't block response)
+    syncProductToWooCommerce(product).catch(err => {
+      console.error('Failed to sync product to WooCommerce:', err);
+      // Don't fail the request if sync fails
+    });
+    
     res.json({
       success: true,
       message: 'Product updated successfully',
@@ -466,6 +479,14 @@ export const deleteProduct = async (req, res) => {
           }
         }
       }
+    }
+
+    // Delete from WooCommerce first (before deleting from POS)
+    if (product.sku) {
+      await deleteProductFromWooCommerce(product.sku).catch(err => {
+        console.error('Failed to delete product from WooCommerce:', err);
+        // Continue with deletion even if WooCommerce sync fails
+      });
     }
 
     // Delete the product
