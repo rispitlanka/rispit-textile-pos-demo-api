@@ -10,7 +10,8 @@
     "dev": "nodemon server.js",
     "migrate:invoice-counter": "node migrations/initInvoiceCounter.js",
     "create:admin": "node utils/createAdminUser.js",
-    "create:rispit-admin": "node utils/createRispitAdminUser.js"
+    "create:rispit-admin": "node utils/createRispitAdminUser.js",
+    "test:woocommerce": "node utils/testWooCommerceConnection.js"
   },
   "author": "rispit",
   "license": "ISC",

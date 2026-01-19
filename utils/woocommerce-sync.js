@@ -14,15 +14,21 @@ const SYNC_CONFIG = {
 
 /**
  * Check if WooCommerce sync is enabled and configured
+ * Checks process.env directly to ensure we get current values
  */
 export function isWooCommerceSyncEnabled() {
-  const enabled = SYNC_TO_WOOCOMMERCE && WORDPRESS_URL && WORDPRESS_API_KEY;
+  // Check process.env directly instead of module constants
+  const syncEnabled = process.env.SYNC_TO_WOOCOMMERCE === 'true';
+  const wordpressUrl = process.env.WORDPRESS_URL || '';
+  const wordpressApiKey = process.env.WORDPRESS_API_KEY || '';
+  
+  const enabled = syncEnabled && wordpressUrl && wordpressApiKey;
   
   if (process.env.NODE_ENV !== 'production') {
     console.log('[WooCommerce Sync] Configuration check:', {
-      SYNC_TO_WOOCOMMERCE,
-      WORDPRESS_URL: WORDPRESS_URL ? `${WORDPRESS_URL.substring(0, 30)}...` : 'NOT SET',
-      WORDPRESS_API_KEY: WORDPRESS_API_KEY ? `SET (${WORDPRESS_API_KEY.length} chars)` : 'NOT SET',
+      SYNC_TO_WOOCOMMERCE: syncEnabled,
+      WORDPRESS_URL: wordpressUrl ? `${wordpressUrl.substring(0, 30)}...` : 'NOT SET',
+      WORDPRESS_API_KEY: wordpressApiKey ? `SET (${wordpressApiKey.length} chars)` : 'NOT SET',
       enabled
     });
   }
@@ -32,23 +38,29 @@ export function isWooCommerceSyncEnabled() {
 
 /**
  * Validate WooCommerce sync configuration
+ * Checks process.env directly to ensure we get current values
  */
 export function validateWooCommerceConfig() {
   const issues = [];
   
-  if (!SYNC_TO_WOOCOMMERCE) {
+  // Check process.env directly instead of module constants
+  const syncEnabled = process.env.SYNC_TO_WOOCOMMERCE === 'true';
+  const wordpressUrl = process.env.WORDPRESS_URL || '';
+  const wordpressApiKey = process.env.WORDPRESS_API_KEY || '';
+  
+  if (!syncEnabled) {
     issues.push('SYNC_TO_WOOCOMMERCE is not set to "true"');
   }
   
-  if (!WORDPRESS_URL) {
+  if (!wordpressUrl) {
     issues.push('WORDPRESS_URL is not configured');
-  } else if (!WORDPRESS_URL.startsWith('http://') && !WORDPRESS_URL.startsWith('https://')) {
+  } else if (!wordpressUrl.startsWith('http://') && !wordpressUrl.startsWith('https://')) {
     issues.push('WORDPRESS_URL must start with http:// or https://');
   }
   
-  if (!WORDPRESS_API_KEY) {
+  if (!wordpressApiKey) {
     issues.push('WORDPRESS_API_KEY is not configured');
-  } else if (WORDPRESS_API_KEY.length < 10) {
+  } else if (wordpressApiKey.length < 10) {
     issues.push('WORDPRESS_API_KEY appears to be too short (should be at least 10 characters)');
   }
   
@@ -590,10 +602,14 @@ export async function deleteProductFromWooCommerce(sku) {
  * Check WordPress plugin status
  */
 export async function checkWordPressPluginStatus() {
-  if (!WORDPRESS_URL || !WORDPRESS_API_KEY) {
+  // Check process.env directly instead of module constants
+  const wordpressUrl = process.env.WORDPRESS_URL || '';
+  const wordpressApiKey = process.env.WORDPRESS_API_KEY || '';
+  
+  if (!wordpressUrl || !wordpressApiKey) {
     console.log('[WooCommerce Sync] Status check failed - missing configuration:', {
-      WORDPRESS_URL: WORDPRESS_URL ? 'SET' : 'NOT SET',
-      WORDPRESS_API_KEY: WORDPRESS_API_KEY ? 'SET' : 'NOT SET'
+      WORDPRESS_URL: wordpressUrl ? 'SET' : 'NOT SET',
+      WORDPRESS_API_KEY: wordpressApiKey ? 'SET' : 'NOT SET'
     });
     return {
       enabled: false,
@@ -601,11 +617,11 @@ export async function checkWordPressPluginStatus() {
     };
   }
 
-  const statusUrl = `${WORDPRESS_URL}/wp-json/wc-pos-sync/v1/status`;
+  const statusUrl = `${wordpressUrl}/wp-json/wc-pos-sync/v1/status`;
   console.log('[WooCommerce Sync] Checking WordPress plugin status:', {
     url: statusUrl,
-    apiKeyLength: WORDPRESS_API_KEY.length,
-    apiKeyPreview: `${WORDPRESS_API_KEY.substring(0, 8)}...${WORDPRESS_API_KEY.substring(WORDPRESS_API_KEY.length - 4)}`
+    apiKeyLength: wordpressApiKey.length,
+    apiKeyPreview: `${wordpressApiKey.substring(0, 8)}...${wordpressApiKey.substring(wordpressApiKey.length - 4)}`
   });
 
   try {
@@ -614,7 +630,7 @@ export async function checkWordPressPluginStatus() {
       statusUrl,
       {
         headers: {
-          'X-API-Key': WORDPRESS_API_KEY
+          'X-API-Key': wordpressApiKey
         },
         timeout: 10000
       }
