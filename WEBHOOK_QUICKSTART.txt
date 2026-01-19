@@ -1,0 +1,199 @@
+╔════════════════════════════════════════════════════════════════════════════╗
+║                                                                            ║
+║            🔗 WooCommerce → POS API Webhook Integration                   ║
+║                        QUICK START GUIDE                                   ║
+║                                                                            ║
+╚════════════════════════════════════════════════════════════════════════════╝
+
+┏━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓
+┃ STEP 1: GENERATE API KEY                                                 ┃
+┗━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┛
+
+Run this command to generate a secure API key:
+
+    openssl rand -hex 32
+
+Copy the output (32-character string)
+
+
+┏━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓
+┃ STEP 2: ADD TO .ENV FILE                                                 ┃
+┗━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┛
+
+Edit your .env file and add:
+
+    WEBHOOK_API_KEY=paste-your-generated-key-here
+    MONGODB_URI=mongodb://localhost:27017/pos-system
+    JWT_SECRET=your-jwt-secret
+
+
+┏━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓
+┃ STEP 3: RESTART SERVER                                                   ┃
+┗━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┛
+
+Restart your POS API server:
+
+    npm run dev
+
+Wait for: "Server running on port 8080"
+
+
+┏━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓
+┃ STEP 4: TEST HEALTH CHECK                                                ┃
+┗━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┛
+
+Test that the webhook endpoint is working:
+
+    curl http://localhost:8080/api/webhooks/health
+
+Expected response:
+    {"success":true,"status":"ok",...}
+
+
+┏━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓
+┃ STEP 5: CONFIGURE WORDPRESS                                              ┃
+┗━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┛
+
+1. Install WooCommerce POS Sync plugin (from /wp-plugin directory)
+2. Go to: WordPress Admin → POS Sync
+3. Configure Order Webhook Settings:
+
+    ✓ Enable Order Webhooks: [✓] Checked
+    
+    Webhook URL: https://your-domain.com/api/webhooks/orders
+    
+    API Key: [paste the same key from Step 1]
+    
+    Max Retries: 3
+
+4. Click "Save Changes"
+
+
+┏━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓
+┃ STEP 6: TEST WITH REAL ORDER                                             ┃
+┗━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┛
+
+1. Create a test order in WooCommerce
+2. Check your POS API console logs for:
+   "📦 Webhook received: order.created"
+3. Verify order in MongoDB:
+   db.woocommerceorders.find().pretty()
+
+
+┏━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓
+┃ ✅ VERIFICATION CHECKLIST                                                ┃
+┗━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┛
+
+□ API key generated (32 characters)
+□ WEBHOOK_API_KEY added to .env
+□ Server restarted successfully
+□ Health check returns success
+□ WordPress plugin installed and activated
+□ Webhook URL configured correctly
+□ API key matches in WordPress and .env
+□ Test order created successfully
+□ Order appears in POS database
+□ Inventory updated correctly
+
+
+┏━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓
+┃ 📚 DOCUMENTATION                                                         ┃
+┗━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┛
+
+WEBHOOK_README.md               → Start here (overview)
+WEBHOOK_SETUP_GUIDE.md         → Detailed setup (5 min)
+WEBHOOK_INTEGRATION.md          → Full documentation
+WEBHOOK_IMPLEMENTATION_SUMMARY.md → Technical details
+/api-docs                       → Interactive API docs
+test-webhook.sh                 → Automated tests
+
+
+┏━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓
+┃ 🎯 WHAT HAPPENS AUTOMATICALLY                                           ┃
+┗━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┛
+
+When an order is created in WooCommerce:
+
+✅ Order data sent to POS API
+✅ Order stored in MongoDB
+✅ Product inventory reduced automatically
+✅ Customer created/updated in POS
+✅ Order status tracked in history
+
+When an order is cancelled/refunded:
+
+✅ Inventory restored automatically
+✅ Status updated and tracked
+
+
+┏━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓
+┃ 🔌 API ENDPOINTS                                                         ┃
+┗━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┛
+
+Public (API Key Required):
+  POST /api/webhooks/orders      → Receive webhooks
+  GET  /api/webhooks/health       → Health check
+
+Authenticated (JWT Required):
+  GET  /api/webhooks/orders       → List all orders
+  GET  /api/webhooks/orders/:id   → Get single order
+  GET  /api/webhooks/orders/stats → Get statistics
+
+
+┏━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓
+┃ ⚠️  TROUBLESHOOTING                                                      ┃
+┗━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┛
+
+Problem: Webhooks not arriving
+→ Check API key matches
+→ Verify URL is accessible
+→ Check firewall settings
+
+Problem: 401 Unauthorized
+→ Verify API key is correct
+→ Restart server after changing .env
+→ Check for extra spaces in key
+
+Problem: Inventory not updating
+→ Verify SKUs match exactly
+→ Check products exist in POS
+→ Look for processing errors
+
+
+┏━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓
+┃ 🧪 TESTING                                                               ┃
+┗━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┛
+
+Run automated tests:
+
+    ./test-webhook.sh
+
+Manual test:
+
+    curl -X POST http://localhost:8080/api/webhooks/orders \
+      -H "Content-Type: application/json" \
+      -H "X-API-Key: YOUR_API_KEY" \
+      -d '{"event":"order.created","data":{"id":123}}'
+
+
+┏━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓
+┃ 🔒 SECURITY NOTES                                                        ┃
+┗━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┛
+
+✓ Use strong API keys (32+ characters)
+✓ Never commit .env to Git
+✓ Use HTTPS in production
+✓ Different keys per environment
+✓ Rotate keys every 90 days
+
+
+╔════════════════════════════════════════════════════════════════════════════╗
+║                                                                            ║
+║                     🎉 SETUP COMPLETE!                                    ║
+║                                                                            ║
+║         Your WooCommerce orders will now sync to your POS API!            ║
+║                                                                            ║
+╚════════════════════════════════════════════════════════════════════════════╝
+
+
+Need help? Read WEBHOOK_SETUP_GUIDE.md or visit /api-docs

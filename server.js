@@ -25,6 +25,7 @@ import returnRoutes from './routes/returnRoutes.js';
 import uploadRoutes from './routes/uploadRoutes.js';
 import purchaseOrderRoutes from './routes/purchaseOrderRoutes.js';
 import supplierRoutes from './routes/supplierRoutes.js';
+import webhookRoutes from './routes/webhookRoutes.js';
 
 dotenv.config();
 
@@ -34,7 +35,7 @@ dotenv.config();
 
 
 const app = express();
-const PORT = process.env.PORT || 8080;
+const PORT = 8080;
 
 // Middleware
 app.use(cors());
@@ -75,6 +76,7 @@ app.use('/api/returns', returnRoutes);
 app.use('/api/uploads', uploadRoutes);
 app.use('/api/purchase-orders', purchaseOrderRoutes);
 app.use('/api/suppliers', supplierRoutes);
+app.use('/api/webhooks', webhookRoutes);
 
 // Welcome endpoint - no auth required
 /**

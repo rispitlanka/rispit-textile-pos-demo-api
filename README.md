@@ -12,6 +12,7 @@ A comprehensive Point of Sale (POS) system backend built with Node.js, Express, 
 - 📊 **Reports & Analytics** - Sales reports, inventory reports, and business analytics
 - 🖼️ **File Upload** - Image uploads for products and receipts using Cloudinary
 - 📚 **API Documentation** - Interactive Swagger/OpenAPI documentation
+- 🔗 **WooCommerce Integration** - Receive order webhooks from WooCommerce for real-time sync
 
 ## Technologies Used
 
@@ -47,10 +48,13 @@ A comprehensive Point of Sale (POS) system backend built with Node.js, Express, 
    PORT=8080
    MONGODB_URI=mongodb://localhost:27017/pos-system
    JWT_SECRET=your-jwt-secret-key
+   WEBHOOK_API_KEY=your-webhook-api-key
    CLOUDINARY_CLOUD_NAME=your-cloudinary-cloud-name
    CLOUDINARY_API_KEY=your-cloudinary-api-key
    CLOUDINARY_API_SECRET=your-cloudinary-api-secret
    ```
+   
+   > **Note:** Generate a secure webhook API key using: `openssl rand -hex 32`
 
 4. Start the server:
    ```bash
@@ -128,6 +132,13 @@ pos-backend/
 - `POST /api/categories` - Create category (Admin only)
 - `GET /api/categories/:id` - Get category by ID
 
+### Webhooks (WooCommerce Integration)
+- `POST /api/webhooks/orders` - Receive order webhook from WooCommerce (API Key required)
+- `GET /api/webhooks/orders` - Get all WooCommerce orders (Auth required)
+- `GET /api/webhooks/orders/:id` - Get single order (Auth required)
+- `GET /api/webhooks/orders/stats` - Get order statistics (Auth required)
+- `GET /api/webhooks/health` - Webhook service health check
+
 For complete API documentation, visit the Swagger UI at `/api-docs`.
 
 ## Authentication
@@ -183,7 +194,44 @@ This project is licensed under the ISC License.
 
 For technical support or questions, please contact the development team.
 
+## WooCommerce Integration
+
+This POS system can receive order webhooks from WooCommerce for real-time synchronization.
+
+### Quick Setup
+
+1. **Generate API Key:**
+   ```bash
+   openssl rand -hex 32
+   ```
+
+2. **Add to `.env` file:**
+   ```bash
+   WEBHOOK_API_KEY=your-generated-key
+   ```
+
+3. **Configure WordPress Plugin:**
+   - Install WooCommerce POS Sync plugin (from `/wp-plugin` directory)
+   - Set Webhook URL: `https://your-api.com/api/webhooks/orders`
+   - Set API Key: (same as above)
+
+4. **Test Connection:**
+   ```bash
+   curl https://your-api.com/api/webhooks/health
+   ```
+
+### Documentation
+
+- **Quick Setup:** See `WEBHOOK_SETUP_GUIDE.md`
+- **Full Documentation:** See `WEBHOOK_INTEGRATION.md`
+- **Features:**
+  - Automatic inventory updates from WooCommerce orders
+  - Customer data synchronization
+  - Order status tracking
+  - Stock restoration on cancellations/refunds
+
 ## Version History
 
 - **v1.0.0** - Initial release with core POS functionality
 - **v1.1.0** - Added Swagger documentation and enhanced API features
+- **v1.2.0** - Added WooCommerce webhook integration
