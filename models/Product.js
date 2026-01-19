@@ -4,8 +4,8 @@ const variationCombinationSchema = new mongoose.Schema({
   sku: {
     type: String,
     required: true,
-    unique: true,
-    trim: true
+    trim: true,
+    sparse: true
   },
   combinationName: {
     type: String,
@@ -178,6 +178,14 @@ productSchema.pre('save', function(next) {
   }
   
   next();
+});
+
+// Create sparse unique index on variationCombinations.sku
+// This allows multiple null values but ensures uniqueness for non-null values
+productSchema.index({ 'variationCombinations.sku': 1 }, { 
+  unique: true, 
+  sparse: true,
+  name: 'variationCombinations_sku_unique'
 });
 
 export default mongoose.model('Product', productSchema);

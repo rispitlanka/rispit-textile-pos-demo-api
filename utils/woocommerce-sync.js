@@ -161,10 +161,13 @@ export async function syncProductToWooCommerce(posProduct, options = {}) {
     retryDelay = Math.floor(SYNC_CONFIG.retryDelay / 2) // Half delay for single product
   } = options;
 
-  const wcProduct = transformProductToWooCommerce(posProduct);
+    const wcProduct = transformProductToWooCommerce(posProduct);
   let retryCount = 0;
   
-  const syncUrl = `${WORDPRESS_URL}/wp-json/wc-pos-sync/v1/sync-product`;
+  // Get current values from process.env
+  const wordpressUrl = process.env.WORDPRESS_URL || '';
+  const wordpressApiKey = process.env.WORDPRESS_API_KEY || '';
+  const syncUrl = `${wordpressUrl}/wp-json/wc-pos-sync/v1/sync-product`;
   
   console.log('[WooCommerce Sync] Starting single product sync:', {
     productName: posProduct.name,
@@ -183,7 +186,7 @@ export async function syncProductToWooCommerce(posProduct, options = {}) {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          'X-API-Key': WORDPRESS_API_KEY ? `${WORDPRESS_API_KEY.substring(0, 8)}...${WORDPRESS_API_KEY.substring(WORDPRESS_API_KEY.length - 4)}` : 'NOT SET'
+          'X-API-Key': wordpressApiKey ? `${wordpressApiKey.substring(0, 8)}...${wordpressApiKey.substring(wordpressApiKey.length - 4)}` : 'NOT SET'
         },
         payloadSize: JSON.stringify(wcProduct).length,
         timeout: `${timeout}ms`
@@ -196,7 +199,7 @@ export async function syncProductToWooCommerce(posProduct, options = {}) {
         {
           headers: {
             'Content-Type': 'application/json',
-            'X-API-Key': WORDPRESS_API_KEY
+            'X-API-Key': wordpressApiKey
           },
           timeout: timeout
         }
@@ -210,10 +213,10 @@ export async function syncProductToWooCommerce(posProduct, options = {}) {
         statusText: response.statusText,
         responseData: response.data
       });
-      
-      console.log(`✅ Product synced to WooCommerce: ${posProduct.name} (SKU: ${wcProduct.sku})`);
-      return response.data;
-    } catch (error) {
+    
+    console.log(`✅ Product synced to WooCommerce: ${posProduct.name} (SKU: ${wcProduct.sku})`);
+    return response.data;
+  } catch (error) {
       retryCount++;
       const isTimeout = error.code === 'ECONNABORTED' || error.message.includes('timeout');
       const isAuthError = error.response?.status === 401 || error.response?.status === 403;
@@ -253,10 +256,10 @@ export async function syncProductToWooCommerce(posProduct, options = {}) {
           console.error(`❌ Error syncing product to WooCommerce (${posProduct.name}) after ${maxRetries} retries:`, 
             errorMessage);
         }
-        
-        // Return error info for optional handling
-        return {
-          success: false,
+    
+    // Return error info for optional handling
+    return {
+      success: false,
           error: isAuthError 
             ? {
                 code: errorData.code || 'authentication_error',
@@ -338,6 +341,9 @@ export async function syncProductsToWooCommerce(posProducts, options = {}) {
     chunks.push(posProducts.slice(i, i + chunkSize));
   }
 
+  // Get current values from process.env for logging
+  const wordpressUrl = process.env.WORDPRESS_URL || '';
+  
   console.log(`[WooCommerce Sync] 📦 Starting batch sync:`, {
     totalProducts: posProducts.length,
     chunkSize,
@@ -345,7 +351,7 @@ export async function syncProductsToWooCommerce(posProducts, options = {}) {
     timeout: `${timeout}ms`,
     maxRetries,
     retryDelay: `${retryDelay}ms`,
-    syncUrl: `${WORDPRESS_URL}/wp-json/wc-pos-sync/v1/sync-products`
+    syncUrl: `${wordpressUrl}/wp-json/wc-pos-sync/v1/sync-products`
   });
   console.log(`📦 Syncing ${posProducts.length} products in ${chunks.length} chunks of ${chunkSize}...`);
 
@@ -367,7 +373,10 @@ export async function syncProductsToWooCommerce(posProducts, options = {}) {
 
     while (retryCount <= maxRetries && !success) {
       const attempt = retryCount + 1;
-      const syncUrl = `${WORDPRESS_URL}/wp-json/wc-pos-sync/v1/sync-products`;
+      // Get current values from process.env
+      const wordpressUrl = process.env.WORDPRESS_URL || '';
+      const wordpressApiKey = process.env.WORDPRESS_API_KEY || '';
+      const syncUrl = `${wordpressUrl}/wp-json/wc-pos-sync/v1/sync-products`;
       
       try {
         console.log(`[WooCommerce Sync] Chunk ${chunkIndex + 1} - Attempt ${attempt}/${maxRetries + 1}:`, {
@@ -378,18 +387,18 @@ export async function syncProductsToWooCommerce(posProducts, options = {}) {
           timeout: `${timeout}ms`,
           headers: {
             'Content-Type': 'application/json',
-            'X-API-Key': WORDPRESS_API_KEY ? `${WORDPRESS_API_KEY.substring(0, 8)}...${WORDPRESS_API_KEY.substring(WORDPRESS_API_KEY.length - 4)}` : 'NOT SET'
+            'X-API-Key': wordpressApiKey ? `${wordpressApiKey.substring(0, 8)}...${wordpressApiKey.substring(wordpressApiKey.length - 4)}` : 'NOT SET'
           }
         });
         
         const requestStartTime = Date.now();
-        const response = await axios.post(
+    const response = await axios.post(
           syncUrl,
-          wcProducts,
-          {
-            headers: {
-              'Content-Type': 'application/json',
-              'X-API-Key': WORDPRESS_API_KEY
+      wcProducts,
+      {
+        headers: {
+          'Content-Type': 'application/json',
+              'X-API-Key': wordpressApiKey
             },
             timeout: timeout
           }
@@ -414,10 +423,39 @@ export async function syncProductsToWooCommerce(posProducts, options = {}) {
                 wooCommerce: item
               });
             } else {
+              // Parse WordPress error if present
+              let parsedError = item?.error || 'Unknown error';
+              if (item?.error?.data?.error) {
+                const wpError = item.error.data.error;
+                if (wpError.message?.includes('SKU') && wpError.message?.includes('already present')) {
+                  const skuMatch = wpError.message.match(/SKU \(([^)]+)\)/);
+                  const conflictingSku = skuMatch ? skuMatch[1] : 'unknown';
+                  parsedError = {
+                    code: 'sku_conflict',
+                    message: `Product with SKU "${conflictingSku}" already exists in WooCommerce. The plugin should update existing products.`,
+                    data: {
+                      status: item.error.data?.status,
+                      wordpressError: {
+                        message: wpError.message,
+                        file: wpError.file,
+                        line: wpError.line
+                      },
+                      hint: 'Product may need to be deleted from WooCommerce first, or the WordPress plugin needs to handle updates instead of creates.'
+                    }
+                  };
+                } else {
+                  parsedError = {
+                    code: item.error.code || 'wordpress_error',
+                    message: wpError.message || item.error.message,
+                    data: item.error.data
+                  };
+                }
+              }
+              
               results.failed.push({
                 product: chunk[index].name,
                 sku: chunk[index].sku || chunk[index]._id?.toString(),
-                error: item?.error || 'Unknown error'
+                error: parsedError
               });
             }
           });
@@ -440,23 +478,50 @@ export async function syncProductsToWooCommerce(posProducts, options = {}) {
         });
         console.log(`✅ Synced chunk ${chunkIndex + 1}/${chunks.length} (${chunk.length} products)`);
         success = true;
-      } catch (error) {
+  } catch (error) {
         retryCount++;
         const isTimeout = error.code === 'ECONNABORTED' || error.message.includes('timeout');
         const isAuthError = error.response?.status === 401 || error.response?.status === 403;
+        const isServerError = error.response?.status === 500;
         const errorData = error.response?.data || {};
-        const errorMessage = errorData.message || error.message || 'Unknown error';
+        
+        // Parse WordPress error messages
+        let errorMessage = error.message || 'Unknown error';
+        let parsedError = null;
+        
+        if (isServerError && errorData.data?.error) {
+          // Extract actual error from WordPress 500 response
+          const wpError = errorData.data.error;
+          parsedError = {
+            type: wpError.type,
+            message: wpError.message,
+            file: wpError.file,
+            line: wpError.line
+          };
+          
+          // Extract SKU conflict message if present
+          if (wpError.message && wpError.message.includes('SKU') && wpError.message.includes('already present')) {
+            const skuMatch = wpError.message.match(/SKU \(([^)]+)\)/);
+            const conflictingSku = skuMatch ? skuMatch[1] : 'unknown';
+            errorMessage = `Product with SKU "${conflictingSku}" already exists in WooCommerce. The WordPress plugin should update existing products instead of creating new ones.`;
+          } else {
+            errorMessage = wpError.message || errorData.message || error.message;
+          }
+        } else if (errorData.message) {
+          errorMessage = errorData.message;
+        }
 
         console.error(`[WooCommerce Sync] ❌ Chunk ${chunkIndex + 1} - Attempt ${attempt} failed:`, {
           chunkIndex: chunkIndex + 1,
           attempt,
-          errorType: isTimeout ? 'TIMEOUT' : isAuthError ? 'AUTH_ERROR' : 'OTHER',
+          errorType: isTimeout ? 'TIMEOUT' : isAuthError ? 'AUTH_ERROR' : isServerError ? 'WORDPRESS_ERROR' : 'OTHER',
           status: error.response?.status,
           statusText: error.response?.statusText,
           errorCode: error.code,
           errorMessage: error.message,
+          parsedError: parsedError,
           responseData: error.response?.data,
-          willRetry: retryCount <= maxRetries && !isAuthError
+          willRetry: retryCount <= maxRetries && !isAuthError && !isServerError
         });
 
         // Don't retry authentication errors - they won't succeed
@@ -490,24 +555,45 @@ export async function syncProductsToWooCommerce(posProducts, options = {}) {
           break; // Don't retry auth errors
         }
 
-        if (retryCount > maxRetries) {
-          // Max retries reached, mark all products in chunk as failed
-          console.error(`[WooCommerce Sync] ❌ Chunk ${chunkIndex + 1} failed after ${maxRetries} retries:`, {
+        if (retryCount > maxRetries || isServerError) {
+          // Max retries reached or server error (don't retry server errors)
+          const finalError = isServerError 
+            ? {
+                code: errorData.code || 'wordpress_server_error',
+                message: errorMessage,
+                data: {
+                  status: error.response?.status,
+                  wordpressError: parsedError,
+                  hint: isServerError && parsedError?.message?.includes('SKU') 
+                    ? 'Product already exists in WooCommerce. The WordPress plugin should handle updates. Check if products need to be deleted first or if the plugin needs to be updated.'
+                    : 'WordPress plugin encountered an error. Check WordPress error logs for details.'
+                }
+              }
+            : (isTimeout 
+                ? 'Request timeout - WooCommerce server took too long to respond' 
+                : errorData || errorMessage);
+          
+          console.error(`[WooCommerce Sync] ❌ Chunk ${chunkIndex + 1} failed:`, {
             chunkIndex: chunkIndex + 1,
             productsAffected: chunk.length,
             error: errorMessage,
-            isTimeout
+            isTimeout,
+            isServerError,
+            retries: retryCount
           });
-          console.error(`❌ Failed to sync chunk ${chunkIndex + 1}/${chunks.length} after ${maxRetries} retries`);
+          console.error(`❌ Failed to sync chunk ${chunkIndex + 1}/${chunks.length}`);
+          
           chunk.forEach(product => {
             results.failed.push({
               product: product.name,
               sku: product.sku || product._id?.toString(),
-              error: isTimeout 
-                ? 'Request timeout - WooCommerce server took too long to respond' 
-                : errorData || errorMessage
+              error: finalError
             });
           });
+          
+          if (isServerError) {
+            break; // Don't retry server errors
+          }
         } else {
           // Retry with exponential backoff (skip if auth error)
           const delay = retryDelay * Math.pow(2, retryCount - 1);
@@ -572,13 +658,17 @@ export async function deleteProductFromWooCommerce(sku) {
   }
 
   try {
+    // Get current values from process.env
+    const wordpressUrl = process.env.WORDPRESS_URL || '';
+    const wordpressApiKey = process.env.WORDPRESS_API_KEY || '';
+    
     const response = await axios.post(
-      `${WORDPRESS_URL}/wp-json/wc-pos-sync/v1/delete-product`,
+      `${wordpressUrl}/wp-json/wc-pos-sync/v1/delete-product`,
       { sku },
       {
         headers: {
           'Content-Type': 'application/json',
-          'X-API-Key': WORDPRESS_API_KEY
+          'X-API-Key': wordpressApiKey
         },
         timeout: 30000
       }

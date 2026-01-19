@@ -9,6 +9,7 @@
     "start": "node server.js",
     "dev": "nodemon server.js",
     "migrate:invoice-counter": "node migrations/initInvoiceCounter.js",
+    "migrate:fix-variation-sku-index": "node migrations/fixVariationSkuIndex.js",
     "create:admin": "node utils/createAdminUser.js",
     "create:rispit-admin": "node utils/createRispitAdminUser.js",
     "test:woocommerce": "node utils/testWooCommerceConnection.js"
