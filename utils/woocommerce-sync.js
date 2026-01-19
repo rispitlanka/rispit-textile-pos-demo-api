@@ -16,7 +16,46 @@ const SYNC_CONFIG = {
  * Check if WooCommerce sync is enabled and configured
  */
 export function isWooCommerceSyncEnabled() {
-  return SYNC_TO_WOOCOMMERCE && WORDPRESS_URL && WORDPRESS_API_KEY;
+  const enabled = SYNC_TO_WOOCOMMERCE && WORDPRESS_URL && WORDPRESS_API_KEY;
+  
+  if (process.env.NODE_ENV !== 'production') {
+    console.log('[WooCommerce Sync] Configuration check:', {
+      SYNC_TO_WOOCOMMERCE,
+      WORDPRESS_URL: WORDPRESS_URL ? `${WORDPRESS_URL.substring(0, 30)}...` : 'NOT SET',
+      WORDPRESS_API_KEY: WORDPRESS_API_KEY ? `SET (${WORDPRESS_API_KEY.length} chars)` : 'NOT SET',
+      enabled
+    });
+  }
+  
+  return enabled;
+}
+
+/**
+ * Validate WooCommerce sync configuration
+ */
+export function validateWooCommerceConfig() {
+  const issues = [];
+  
+  if (!SYNC_TO_WOOCOMMERCE) {
+    issues.push('SYNC_TO_WOOCOMMERCE is not set to "true"');
+  }
+  
+  if (!WORDPRESS_URL) {
+    issues.push('WORDPRESS_URL is not configured');
+  } else if (!WORDPRESS_URL.startsWith('http://') && !WORDPRESS_URL.startsWith('https://')) {
+    issues.push('WORDPRESS_URL must start with http:// or https://');
+  }
+  
+  if (!WORDPRESS_API_KEY) {
+    issues.push('WORDPRESS_API_KEY is not configured');
+  } else if (WORDPRESS_API_KEY.length < 10) {
+    issues.push('WORDPRESS_API_KEY appears to be too short (should be at least 10 characters)');
+  }
+  
+  return {
+    valid: issues.length === 0,
+    issues: issues
+  };
 }
 
 /**
@@ -100,7 +139,7 @@ function transformProductToWooCommerce(posProduct) {
  */
 export async function syncProductToWooCommerce(posProduct, options = {}) {
   if (!isWooCommerceSyncEnabled()) {
-    console.log('WooCommerce sync is disabled or not configured. Skipping product sync.');
+    console.log('[WooCommerce Sync] Sync disabled or not configured. Skipping product sync.');
     return null;
   }
 
@@ -112,11 +151,35 @@ export async function syncProductToWooCommerce(posProduct, options = {}) {
 
   const wcProduct = transformProductToWooCommerce(posProduct);
   let retryCount = 0;
+  
+  const syncUrl = `${WORDPRESS_URL}/wp-json/wc-pos-sync/v1/sync-product`;
+  
+  console.log('[WooCommerce Sync] Starting single product sync:', {
+    productName: posProduct.name,
+    productId: posProduct._id?.toString(),
+    sku: wcProduct.sku,
+    url: syncUrl,
+    timeout: `${timeout}ms`,
+    maxRetries
+  });
 
   while (retryCount <= maxRetries) {
+    const attempt = retryCount + 1;
     try {
+      console.log(`[WooCommerce Sync] Attempt ${attempt}/${maxRetries + 1} - Sending request:`, {
+        url: syncUrl,
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-API-Key': WORDPRESS_API_KEY ? `${WORDPRESS_API_KEY.substring(0, 8)}...${WORDPRESS_API_KEY.substring(WORDPRESS_API_KEY.length - 4)}` : 'NOT SET'
+        },
+        payloadSize: JSON.stringify(wcProduct).length,
+        timeout: `${timeout}ms`
+      });
+      
+      const startTime = Date.now();
       const response = await axios.post(
-        `${WORDPRESS_URL}/wp-json/wc-pos-sync/v1/sync-product`,
+        syncUrl,
         wcProduct,
         {
           headers: {
@@ -126,29 +189,108 @@ export async function syncProductToWooCommerce(posProduct, options = {}) {
           timeout: timeout
         }
       );
+      const duration = Date.now() - startTime;
+      
+      console.log(`[WooCommerce Sync] ✅ Success (${duration}ms):`, {
+        productName: posProduct.name,
+        sku: wcProduct.sku,
+        status: response.status,
+        statusText: response.statusText,
+        responseData: response.data
+      });
       
       console.log(`✅ Product synced to WooCommerce: ${posProduct.name} (SKU: ${wcProduct.sku})`);
       return response.data;
     } catch (error) {
       retryCount++;
       const isTimeout = error.code === 'ECONNABORTED' || error.message.includes('timeout');
+      const isAuthError = error.response?.status === 401 || error.response?.status === 403;
       const errorMessage = error.response?.data || error.message;
+      const errorData = error.response?.data || {};
+
+      console.error(`[WooCommerce Sync] ❌ Error on attempt ${retryCount}/${maxRetries + 1}:`, {
+        productName: posProduct.name,
+        sku: wcProduct.sku,
+        errorType: isTimeout ? 'TIMEOUT' : isAuthError ? 'AUTH_ERROR' : 'OTHER',
+        status: error.response?.status,
+        statusText: error.response?.statusText,
+        errorCode: error.code,
+        errorMessage: error.message,
+        responseData: error.response?.data,
+        requestUrl: syncUrl,
+        willRetry: retryCount <= maxRetries && !isAuthError
+      });
 
       if (retryCount > maxRetries) {
         // Max retries reached
-        console.error(`❌ Error syncing product to WooCommerce (${posProduct.name}) after ${maxRetries} retries:`, 
-          errorMessage);
+        if (isAuthError) {
+          console.error(`[WooCommerce Sync] ❌ Authentication error after ${maxRetries} retries:`, {
+            productName: posProduct.name,
+            error: errorMessage,
+            status: error.response?.status,
+            hint: 'Check WORDPRESS_API_KEY in .env file matches WordPress plugin settings'
+          });
+          console.error(`❌ Authentication error syncing product to WooCommerce (${posProduct.name}):`, errorMessage);
+          console.error(`   Check your WORDPRESS_API_KEY in .env file`);
+        } else {
+          console.error(`[WooCommerce Sync] ❌ Failed after ${maxRetries} retries:`, {
+            productName: posProduct.name,
+            error: errorMessage,
+            isTimeout
+          });
+          console.error(`❌ Error syncing product to WooCommerce (${posProduct.name}) after ${maxRetries} retries:`, 
+            errorMessage);
+        }
         
         // Return error info for optional handling
         return {
           success: false,
-          error: isTimeout ? 'Request timeout - WooCommerce server took too long to respond' : errorMessage,
+          error: isAuthError 
+            ? {
+                code: errorData.code || 'authentication_error',
+                message: `Authentication failed: ${errorMessage}. Please verify WORDPRESS_API_KEY in your .env file matches the API key in WordPress plugin settings.`,
+                data: {
+                  status: error.response?.status,
+                  hint: 'Check WordPress Admin → POS Sync → Settings for the correct API key'
+                }
+              }
+            : (isTimeout ? 'Request timeout - WooCommerce server took too long to respond' : errorData || errorMessage),
           product: posProduct.name,
           sku: wcProduct.sku
         };
       } else {
+        // Don't retry authentication errors
+        if (isAuthError) {
+          console.error(`[WooCommerce Sync] ❌ Authentication error - not retrying:`, {
+            productName: posProduct.name,
+            error: error.response?.data?.message || error.message,
+            status: error.response?.status
+          });
+          console.error(`❌ Authentication error: ${error.response?.data?.message || error.message}`);
+          console.error(`   Check your WORDPRESS_API_KEY in .env file`);
+          return {
+            success: false,
+            error: {
+              code: error.response?.data?.code || 'authentication_error',
+              message: `Authentication failed: ${error.response?.data?.message || error.message}. Please verify WORDPRESS_API_KEY.`,
+              data: {
+                status: error.response?.status,
+                hint: 'Check WordPress Admin → POS Sync → Settings for the correct API key'
+              }
+            },
+            product: posProduct.name,
+            sku: wcProduct.sku
+          };
+        }
+        
         // Retry with exponential backoff
         const delay = retryDelay * Math.pow(2, retryCount - 1);
+        console.warn(`[WooCommerce Sync] ⚠️  Retrying in ${delay}ms:`, {
+          productName: posProduct.name,
+          attempt: `${retryCount}/${maxRetries}`,
+          delay: `${delay}ms`,
+          nextAttempt: retryCount + 1
+        });
         console.warn(`⚠️  Retrying sync for ${posProduct.name} (attempt ${retryCount}/${maxRetries}) in ${delay}ms...`);
         await new Promise(resolve => setTimeout(resolve, delay));
       }
@@ -184,20 +326,53 @@ export async function syncProductsToWooCommerce(posProducts, options = {}) {
     chunks.push(posProducts.slice(i, i + chunkSize));
   }
 
+  console.log(`[WooCommerce Sync] 📦 Starting batch sync:`, {
+    totalProducts: posProducts.length,
+    chunkSize,
+    totalChunks: chunks.length,
+    timeout: `${timeout}ms`,
+    maxRetries,
+    retryDelay: `${retryDelay}ms`,
+    syncUrl: `${WORDPRESS_URL}/wp-json/wc-pos-sync/v1/sync-products`
+  });
   console.log(`📦 Syncing ${posProducts.length} products in ${chunks.length} chunks of ${chunkSize}...`);
 
   // Process each chunk
   for (let chunkIndex = 0; chunkIndex < chunks.length; chunkIndex++) {
     const chunk = chunks[chunkIndex];
     const wcProducts = chunk.map(transformProductToWooCommerce);
+    const chunkStartTime = Date.now();
+    
+    console.log(`[WooCommerce Sync] Processing chunk ${chunkIndex + 1}/${chunks.length}:`, {
+      chunkIndex: chunkIndex + 1,
+      productsInChunk: chunk.length,
+      productNames: chunk.map(p => p.name),
+      skus: chunk.map(p => p.sku || p._id?.toString())
+    });
     
     let retryCount = 0;
     let success = false;
 
     while (retryCount <= maxRetries && !success) {
+      const attempt = retryCount + 1;
+      const syncUrl = `${WORDPRESS_URL}/wp-json/wc-pos-sync/v1/sync-products`;
+      
       try {
+        console.log(`[WooCommerce Sync] Chunk ${chunkIndex + 1} - Attempt ${attempt}/${maxRetries + 1}:`, {
+          url: syncUrl,
+          method: 'POST',
+          productsCount: wcProducts.length,
+          payloadSize: `${JSON.stringify(wcProducts).length} bytes`,
+          timeout: `${timeout}ms`,
+          headers: {
+            'Content-Type': 'application/json',
+            'X-API-Key': WORDPRESS_API_KEY ? `${WORDPRESS_API_KEY.substring(0, 8)}...${WORDPRESS_API_KEY.substring(WORDPRESS_API_KEY.length - 4)}` : 'NOT SET'
+          }
+        });
+        
+        const requestStartTime = Date.now();
         const response = await axios.post(
-          `${WORDPRESS_URL}/wp-json/wc-pos-sync/v1/sync-products`,
+          syncUrl,
           wcProducts,
           {
             headers: {
@@ -207,6 +382,14 @@ export async function syncProductsToWooCommerce(posProducts, options = {}) {
             timeout: timeout
           }
         );
+        const requestDuration = Date.now() - requestStartTime;
+        
+        console.log(`[WooCommerce Sync] ✅ Chunk ${chunkIndex + 1} success (${requestDuration}ms):`, {
+          status: response.status,
+          statusText: response.statusText,
+          responseDataType: Array.isArray(response.data) ? 'array' : typeof response.data,
+          responseDataLength: Array.isArray(response.data) ? response.data.length : 'N/A'
+        });
         
         // Track successful products
         const responseData = response.data;
@@ -236,26 +419,92 @@ export async function syncProductsToWooCommerce(posProducts, options = {}) {
           });
         }
 
+        const chunkDuration = Date.now() - chunkStartTime;
+        console.log(`[WooCommerce Sync] ✅ Chunk ${chunkIndex + 1}/${chunks.length} completed (${chunkDuration}ms):`, {
+          productsInChunk: chunk.length,
+          successCount: results.success.length,
+          failedCount: results.failed.length,
+          progress: `${chunkIndex + 1}/${chunks.length}`
+        });
         console.log(`✅ Synced chunk ${chunkIndex + 1}/${chunks.length} (${chunk.length} products)`);
         success = true;
       } catch (error) {
         retryCount++;
         const isTimeout = error.code === 'ECONNABORTED' || error.message.includes('timeout');
-        const errorMessage = error.response?.data || error.message;
+        const isAuthError = error.response?.status === 401 || error.response?.status === 403;
+        const errorData = error.response?.data || {};
+        const errorMessage = errorData.message || error.message || 'Unknown error';
+
+        console.error(`[WooCommerce Sync] ❌ Chunk ${chunkIndex + 1} - Attempt ${attempt} failed:`, {
+          chunkIndex: chunkIndex + 1,
+          attempt,
+          errorType: isTimeout ? 'TIMEOUT' : isAuthError ? 'AUTH_ERROR' : 'OTHER',
+          status: error.response?.status,
+          statusText: error.response?.statusText,
+          errorCode: error.code,
+          errorMessage: error.message,
+          responseData: error.response?.data,
+          willRetry: retryCount <= maxRetries && !isAuthError
+        });
+
+        // Don't retry authentication errors - they won't succeed
+        if (isAuthError && retryCount === 1) {
+          console.error(`[WooCommerce Sync] ❌ Authentication error detected - aborting chunk:`, {
+            chunkIndex: chunkIndex + 1,
+            status: error.response?.status,
+            error: errorMessage,
+            productsAffected: chunk.length,
+            hint: 'Check WORDPRESS_API_KEY in .env file matches WordPress plugin settings'
+          });
+          console.error(`❌ Authentication error: ${errorMessage}`);
+          console.error(`   Status: ${error.response?.status}`);
+          console.error(`   Check your WORDPRESS_API_KEY in .env file`);
+          console.error(`   Verify the API key matches the one configured in WordPress plugin`);
+          
+          chunk.forEach(product => {
+            results.failed.push({
+              product: product.name,
+              sku: product.sku || product._id?.toString(),
+              error: {
+                code: errorData.code || 'authentication_error',
+                message: `Authentication failed: ${errorMessage}. Please verify WORDPRESS_API_KEY in your .env file matches the API key in WordPress plugin settings.`,
+                data: {
+                  status: error.response?.status,
+                  hint: 'Check WordPress Admin → POS Sync → Settings for the correct API key'
+                }
+              }
+            });
+          });
+          break; // Don't retry auth errors
+        }
 
         if (retryCount > maxRetries) {
           // Max retries reached, mark all products in chunk as failed
+          console.error(`[WooCommerce Sync] ❌ Chunk ${chunkIndex + 1} failed after ${maxRetries} retries:`, {
+            chunkIndex: chunkIndex + 1,
+            productsAffected: chunk.length,
+            error: errorMessage,
+            isTimeout
+          });
           console.error(`❌ Failed to sync chunk ${chunkIndex + 1}/${chunks.length} after ${maxRetries} retries`);
           chunk.forEach(product => {
             results.failed.push({
               product: product.name,
               sku: product.sku || product._id?.toString(),
-              error: isTimeout ? 'Request timeout - WooCommerce server took too long to respond' : errorMessage
+              error: isTimeout 
+                ? 'Request timeout - WooCommerce server took too long to respond' 
+                : errorData || errorMessage
             });
           });
         } else {
-          // Retry with exponential backoff
+          // Retry with exponential backoff (skip if auth error)
           const delay = retryDelay * Math.pow(2, retryCount - 1);
+          console.warn(`[WooCommerce Sync] ⚠️  Retrying chunk ${chunkIndex + 1} in ${delay}ms:`, {
+            chunkIndex: chunkIndex + 1,
+            attempt: `${retryCount}/${maxRetries}`,
+            delay: `${delay}ms`,
+            nextAttempt: retryCount + 1
+          });
           console.warn(`⚠️  Chunk ${chunkIndex + 1}/${chunks.length} failed (attempt ${retryCount}/${maxRetries}). Retrying in ${delay}ms...`);
           await new Promise(resolve => setTimeout(resolve, delay));
         }
@@ -263,6 +512,14 @@ export async function syncProductsToWooCommerce(posProducts, options = {}) {
     }
   }
 
+  const totalDuration = Date.now() - (Date.now() - (results.total * 100)); // Approximate
+  console.log(`[WooCommerce Sync] 📊 Batch sync completed:`, {
+    totalProducts: results.total,
+    succeeded: results.success.length,
+    failed: results.failed.length,
+    successRate: `${((results.success.length / results.total) * 100).toFixed(1)}%`,
+    chunksProcessed: chunks.length
+  });
   console.log(`📊 Sync complete: ${results.success.length} succeeded, ${results.failed.length} failed out of ${results.total} total`);
 
   // Return results
@@ -334,15 +591,27 @@ export async function deleteProductFromWooCommerce(sku) {
  */
 export async function checkWordPressPluginStatus() {
   if (!WORDPRESS_URL || !WORDPRESS_API_KEY) {
+    console.log('[WooCommerce Sync] Status check failed - missing configuration:', {
+      WORDPRESS_URL: WORDPRESS_URL ? 'SET' : 'NOT SET',
+      WORDPRESS_API_KEY: WORDPRESS_API_KEY ? 'SET' : 'NOT SET'
+    });
     return {
       enabled: false,
       message: 'WordPress URL or API key not configured'
     };
   }
 
+  const statusUrl = `${WORDPRESS_URL}/wp-json/wc-pos-sync/v1/status`;
+  console.log('[WooCommerce Sync] Checking WordPress plugin status:', {
+    url: statusUrl,
+    apiKeyLength: WORDPRESS_API_KEY.length,
+    apiKeyPreview: `${WORDPRESS_API_KEY.substring(0, 8)}...${WORDPRESS_API_KEY.substring(WORDPRESS_API_KEY.length - 4)}`
+  });
+
   try {
+    const startTime = Date.now();
     const response = await axios.get(
-      `${WORDPRESS_URL}/wp-json/wc-pos-sync/v1/status`,
+      statusUrl,
       {
         headers: {
           'X-API-Key': WORDPRESS_API_KEY
@@ -350,6 +619,13 @@ export async function checkWordPressPluginStatus() {
         timeout: 10000
       }
     );
+    const duration = Date.now() - startTime;
+    
+    console.log('[WooCommerce Sync] ✅ Status check successful:', {
+      status: response.status,
+      duration: `${duration}ms`,
+      responseData: response.data
+    });
     
     return {
       enabled: true,
@@ -357,6 +633,15 @@ export async function checkWordPressPluginStatus() {
       status: response.data
     };
   } catch (error) {
+    console.error('[WooCommerce Sync] ❌ Status check failed:', {
+      status: error.response?.status,
+      statusText: error.response?.statusText,
+      errorCode: error.code,
+      errorMessage: error.message,
+      responseData: error.response?.data,
+      isAuthError: error.response?.status === 401 || error.response?.status === 403
+    });
+    
     return {
       enabled: true,
       connected: false,
