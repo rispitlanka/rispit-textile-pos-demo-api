@@ -4,6 +4,14 @@ const WORDPRESS_URL = process.env.WORDPRESS_URL || '';
 const WORDPRESS_API_KEY = process.env.WORDPRESS_API_KEY || '';
 const SYNC_TO_WOOCOMMERCE = process.env.SYNC_TO_WOOCOMMERCE === 'true';
 
+// Configuration for sync operations
+const SYNC_CONFIG = {
+  chunkSize: parseInt(process.env.WOOCOMMERCE_SYNC_CHUNK_SIZE) || 20,
+  timeout: parseInt(process.env.WOOCOMMERCE_SYNC_TIMEOUT) || 120000, // 2 minutes
+  maxRetries: parseInt(process.env.WOOCOMMERCE_SYNC_MAX_RETRIES) || 3,
+  retryDelay: parseInt(process.env.WOOCOMMERCE_SYNC_RETRY_DELAY) || 2000 // 2 seconds
+};
+
 /**
  * Check if WooCommerce sync is enabled and configured
  */
@@ -88,78 +96,194 @@ function transformProductToWooCommerce(posProduct) {
 }
 
 /**
- * Sync single product to WooCommerce
+ * Sync single product to WooCommerce with retry logic
  */
-export async function syncProductToWooCommerce(posProduct) {
+export async function syncProductToWooCommerce(posProduct, options = {}) {
   if (!isWooCommerceSyncEnabled()) {
     console.log('WooCommerce sync is disabled or not configured. Skipping product sync.');
     return null;
   }
 
-  try {
-    const wcProduct = transformProductToWooCommerce(posProduct);
-    
-    const response = await axios.post(
-      `${WORDPRESS_URL}/wp-json/wc-pos-sync/v1/sync-product`,
-      wcProduct,
-      {
-        headers: {
-          'Content-Type': 'application/json',
-          'X-API-Key': WORDPRESS_API_KEY
-        },
-        timeout: 30000 // 30 second timeout
+  const {
+    timeout = SYNC_CONFIG.timeout,
+    maxRetries = Math.min(SYNC_CONFIG.maxRetries, 2), // Max 2 retries for single product
+    retryDelay = Math.floor(SYNC_CONFIG.retryDelay / 2) // Half delay for single product
+  } = options;
+
+  const wcProduct = transformProductToWooCommerce(posProduct);
+  let retryCount = 0;
+
+  while (retryCount <= maxRetries) {
+    try {
+      const response = await axios.post(
+        `${WORDPRESS_URL}/wp-json/wc-pos-sync/v1/sync-product`,
+        wcProduct,
+        {
+          headers: {
+            'Content-Type': 'application/json',
+            'X-API-Key': WORDPRESS_API_KEY
+          },
+          timeout: timeout
+        }
+      );
+      
+      console.log(`✅ Product synced to WooCommerce: ${posProduct.name} (SKU: ${wcProduct.sku})`);
+      return response.data;
+    } catch (error) {
+      retryCount++;
+      const isTimeout = error.code === 'ECONNABORTED' || error.message.includes('timeout');
+      const errorMessage = error.response?.data || error.message;
+
+      if (retryCount > maxRetries) {
+        // Max retries reached
+        console.error(`❌ Error syncing product to WooCommerce (${posProduct.name}) after ${maxRetries} retries:`, 
+          errorMessage);
+        
+        // Return error info for optional handling
+        return {
+          success: false,
+          error: isTimeout ? 'Request timeout - WooCommerce server took too long to respond' : errorMessage,
+          product: posProduct.name,
+          sku: wcProduct.sku
+        };
+      } else {
+        // Retry with exponential backoff
+        const delay = retryDelay * Math.pow(2, retryCount - 1);
+        console.warn(`⚠️  Retrying sync for ${posProduct.name} (attempt ${retryCount}/${maxRetries}) in ${delay}ms...`);
+        await new Promise(resolve => setTimeout(resolve, delay));
       }
-    );
-    
-    console.log(`✅ Product synced to WooCommerce: ${posProduct.name} (SKU: ${wcProduct.sku})`);
-    return response.data;
-  } catch (error) {
-    // Log error but don't throw - we don't want to break product operations
-    console.error(`❌ Error syncing product to WooCommerce (${posProduct.name}):`, 
-      error.response?.data || error.message);
-    
-    // Return error info for optional handling
-    return {
-      success: false,
-      error: error.response?.data || error.message,
-      product: posProduct.name
-    };
+    }
   }
 }
 
 /**
- * Sync multiple products to WooCommerce
+ * Sync multiple products to WooCommerce with chunking and retry logic
  */
-export async function syncProductsToWooCommerce(posProducts) {
+export async function syncProductsToWooCommerce(posProducts, options = {}) {
   if (!isWooCommerceSyncEnabled()) {
     console.log('WooCommerce sync is disabled or not configured. Skipping batch sync.');
     return null;
   }
 
-  try {
-    const wcProducts = posProducts.map(transformProductToWooCommerce);
+  const {
+    chunkSize = SYNC_CONFIG.chunkSize,
+    timeout = SYNC_CONFIG.timeout,
+    maxRetries = SYNC_CONFIG.maxRetries,
+    retryDelay = SYNC_CONFIG.retryDelay
+  } = options;
+
+  const results = {
+    success: [],
+    failed: [],
+    total: posProducts.length
+  };
+
+  // Split products into chunks
+  const chunks = [];
+  for (let i = 0; i < posProducts.length; i += chunkSize) {
+    chunks.push(posProducts.slice(i, i + chunkSize));
+  }
+
+  console.log(`📦 Syncing ${posProducts.length} products in ${chunks.length} chunks of ${chunkSize}...`);
+
+  // Process each chunk
+  for (let chunkIndex = 0; chunkIndex < chunks.length; chunkIndex++) {
+    const chunk = chunks[chunkIndex];
+    const wcProducts = chunk.map(transformProductToWooCommerce);
     
-    const response = await axios.post(
-      `${WORDPRESS_URL}/wp-json/wc-pos-sync/v1/sync-products`,
-      wcProducts,
-      {
-        headers: {
-          'Content-Type': 'application/json',
-          'X-API-Key': WORDPRESS_API_KEY
-        },
-        timeout: 60000 // 60 second timeout for batch operations
+    let retryCount = 0;
+    let success = false;
+
+    while (retryCount <= maxRetries && !success) {
+      try {
+        const response = await axios.post(
+          `${WORDPRESS_URL}/wp-json/wc-pos-sync/v1/sync-products`,
+          wcProducts,
+          {
+            headers: {
+              'Content-Type': 'application/json',
+              'X-API-Key': WORDPRESS_API_KEY
+            },
+            timeout: timeout
+          }
+        );
+        
+        // Track successful products
+        const responseData = response.data;
+        if (responseData && Array.isArray(responseData)) {
+          responseData.forEach((item, index) => {
+            if (item && item.success !== false) {
+              results.success.push({
+                product: chunk[index].name,
+                sku: chunk[index].sku || chunk[index]._id?.toString(),
+                wooCommerce: item
+              });
+            } else {
+              results.failed.push({
+                product: chunk[index].name,
+                sku: chunk[index].sku || chunk[index]._id?.toString(),
+                error: item?.error || 'Unknown error'
+              });
+            }
+          });
+        } else {
+          // If response doesn't have array, assume all succeeded
+          chunk.forEach(product => {
+            results.success.push({
+              product: product.name,
+              sku: product.sku || product._id?.toString()
+            });
+          });
+        }
+
+        console.log(`✅ Synced chunk ${chunkIndex + 1}/${chunks.length} (${chunk.length} products)`);
+        success = true;
+      } catch (error) {
+        retryCount++;
+        const isTimeout = error.code === 'ECONNABORTED' || error.message.includes('timeout');
+        const errorMessage = error.response?.data || error.message;
+
+        if (retryCount > maxRetries) {
+          // Max retries reached, mark all products in chunk as failed
+          console.error(`❌ Failed to sync chunk ${chunkIndex + 1}/${chunks.length} after ${maxRetries} retries`);
+          chunk.forEach(product => {
+            results.failed.push({
+              product: product.name,
+              sku: product.sku || product._id?.toString(),
+              error: isTimeout ? 'Request timeout - WooCommerce server took too long to respond' : errorMessage
+            });
+          });
+        } else {
+          // Retry with exponential backoff
+          const delay = retryDelay * Math.pow(2, retryCount - 1);
+          console.warn(`⚠️  Chunk ${chunkIndex + 1}/${chunks.length} failed (attempt ${retryCount}/${maxRetries}). Retrying in ${delay}ms...`);
+          await new Promise(resolve => setTimeout(resolve, delay));
+        }
       }
-    );
-    
-    console.log(`✅ Synced ${wcProducts.length} products to WooCommerce`);
-    return response.data;
-  } catch (error) {
-    console.error('❌ Error syncing products to WooCommerce:', 
-      error.response?.data || error.message);
-    
+    }
+  }
+
+  console.log(`📊 Sync complete: ${results.success.length} succeeded, ${results.failed.length} failed out of ${results.total} total`);
+
+  // Return results
+  if (results.failed.length === 0) {
+    return {
+      success: true,
+      message: `Successfully synced ${results.success.length} products`,
+      results: results
+    };
+  } else if (results.success.length === 0) {
     return {
       success: false,
-      error: error.response?.data || error.message
+      message: `Failed to sync all ${results.failed.length} products`,
+      error: 'All products failed to sync',
+      results: results
+    };
+  } else {
+    return {
+      success: true,
+      message: `Synced ${results.success.length} products, ${results.failed.length} failed`,
+      results: results
     };
   }
 }

@@ -88,21 +88,42 @@ export const syncAllProducts = async (req, res) => {
       });
     }
 
-    const result = await syncProductsToWooCommerce(products);
+    // Allow custom chunk size via query parameter
+    const chunkSize = parseInt(req.query.chunkSize) || 20;
     
-    if (result && result.success === false) {
+    const result = await syncProductsToWooCommerce(products, {
+      chunkSize: chunkSize,
+      timeout: 120000, // 2 minutes per chunk
+      maxRetries: 3
+    });
+    
+    if (!result) {
       return res.status(500).json({
         success: false,
-        message: 'Failed to sync products to WooCommerce',
-        error: result.error
+        message: 'Failed to sync products to WooCommerce - sync is not enabled or configured'
       });
     }
 
-    res.json({
-      success: true,
-      message: `Synced ${products.length} products to WooCommerce`,
-      synced: products.length,
-      results: result?.results || result
+    if (result.success === false && result.results?.failed?.length === products.length) {
+      // All products failed
+      return res.status(500).json({
+        success: false,
+        message: result.message || 'Failed to sync products to WooCommerce',
+        error: result.error,
+        results: result.results
+      });
+    }
+
+    // Partial or full success
+    const statusCode = result.success === false ? 207 : 200; // 207 Multi-Status for partial success
+    
+    res.status(statusCode).json({
+      success: result.success !== false,
+      message: result.message || `Synced ${products.length} products to WooCommerce`,
+      synced: result.results?.success?.length || 0,
+      failed: result.results?.failed?.length || 0,
+      total: products.length,
+      results: result.results
     });
   } catch (error) {
     res.status(500).json({
