@@ -35,8 +35,12 @@ export const createProduct = async (req, res) => {
     const product = new Product(productData);
     
     // Add uploaded product image if any
-    if (req.files && req.files['image']) {
-      product.image = req.files['image'][0].path;
+    // Note: optionalUpload.any() makes req.files an array (multer "any" mode)
+    if (Array.isArray(req.files)) {
+      const mainImageFile = req.files.find(file => file.fieldname === 'image');
+      if (mainImageFile) {
+        product.image = mainImageFile.path;
+      }
     }
 
     // Process variations if they exist
@@ -92,9 +96,13 @@ export const createProduct = async (req, res) => {
         const combination = product.variationCombinations[i];
         
         // Handle image upload for this combination
+        // With optionalUpload.any(), req.files is an array, so we need to match by fieldname
         const imageFieldName = `variationCombinations[${i}][image]`;
-        if (req.files && req.files[imageFieldName]) {
-          combination.image = req.files[imageFieldName][0].path;
+        if (Array.isArray(req.files)) {
+          const comboImageFile = req.files.find(file => file.fieldname === imageFieldName);
+          if (comboImageFile) {
+            combination.image = comboImageFile.path;
+          }
         }
         
         // Generate combination name from variations
